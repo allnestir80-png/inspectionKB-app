@@ -1,0 +1,10 @@
+{
+    "name": "Чек-лист проверки магазина",
+    "short_name": "Инспекция",
+    "description": "Telegram Web App для ревизоров",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#f5f5f5",
+    "theme_color": "#2563eb",
+    "orientation": "portrait"
+}
