@@ -2,12 +2,13 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
     <title>Чек-лист проверки магазина</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563eb">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.0/dist/jszip.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { 
@@ -141,7 +142,6 @@
         .comment-field:focus { outline: none; border-color: var(--tg-theme-button-color, #2563eb); }
         
         .photo-upload { margin-top: 12px; }
-        .photo-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
         .photo-btn { 
             display: inline-flex; 
             align-items: center; 
@@ -270,10 +270,10 @@
     
     <div class="toast" id="toast"></div>
     
-    <script src="app.js?v=1.1"></script>
+    <script src="app.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
+            navigator.serviceWorker.register('sw.js?v=2.0')
                 .then(() => console.log('✅ Service Worker зарегистрирован'))
                 .catch(err => console.error('❌ Ошибка SW:', err));
         }
@@ -298,4 +298,3 @@
     </script>
 </body>
 </html>
-
