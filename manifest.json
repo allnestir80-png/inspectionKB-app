@@ -1,11 +1,25 @@
 {
     "name": "Чек-лист проверки магазина",
     "short_name": "Инспекция",
-    "description": "Telegram Web App для ревизоров",
+    "description": "Telegram Web App для ревизоров помещений",
     "start_url": "./index.html",
     "display": "standalone",
     "background_color": "#f5f5f5",
     "theme_color": "#2563eb",
     "orientation": "portrait",
-    "version": "2.0"
+    "scope": "./",
+    "lang": "ru",
+    "version": "2.0",
+    "icons": [
+        {
+            "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect fill='%232563eb' width='192' height='192' rx='24'/%3E%3Ctext x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='80' fill='white'%3E📋%3C/text%3E%3C/svg%3E",
+            "sizes": "192x192",
+            "type": "image/svg+xml"
+        },
+        {
+            "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect fill='%232563eb' width='512' height='512' rx='64'/%3E%3Ctext x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='220' fill='white'%3E📋%3C/text%3E%3C/svg%3E",
+            "sizes": "512x512",
+            "type": "image/svg+xml"
+        }
+    ]
 }
