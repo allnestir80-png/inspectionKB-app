@@ -337,9 +337,11 @@ async function sendReport() {
     showToast('🔄 Генерация Excel отчёта...');
     
     try {
+        // Создаём Excel файл
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet('Проверка');
         
+        // Настройка колонок
         worksheet.columns = [
             { header: 'Раздел', key: 'section', width: 30 },
             { header: 'Пункт', key: 'item_id', width: 10 },
@@ -349,6 +351,7 @@ async function sendReport() {
             { header: 'Фото', key: 'photo', width: 10 }
         ];
         
+        // Заголовок отчёта
         worksheet.addRow(['Магазин:', storeNumber]).font = { bold: true };
         worksheet.addRow(['Адрес:', inspectionState.storeAddress || 'не указан']);
         worksheet.addRow(['Ревизор:', inspectionState.inspectorName || 'не указан']);
@@ -358,6 +361,7 @@ async function sendReport() {
         worksheet.addRow(['Статус:', violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ']);
         worksheet.addRow([]);
         
+        // Данные чек-листа
         CHECKLIST_DATA.forEach(section => {
             section.items.forEach(item => {
                 const answer = inspectionState.answers[item.id] || {};
@@ -374,10 +378,12 @@ async function sendReport() {
             });
         });
         
+        // Генерируем Excel файл
         const buffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = URL.createObjectURL(blob);
         
+        // Создаём ссылку для скачивания
         const a = document.createElement('a');
         a.href = url;
         a.download = `Проверка_${storeNumber}_${new Date().toISOString().split('T')[0]}.xlsx`;
@@ -386,6 +392,7 @@ async function sendReport() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
+        // Формируем текст для отправки
         const reportText = `📋 ПРОВЕРКА МАГАЗИНА
 
 🏪 Магазин: ${storeNumber}
@@ -397,10 +404,12 @@ ${violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУ
 
 Отправьте файл нужному получателю в Telegram.`;
         
+        // Копируем текст в буфер
         await navigator.clipboard.writeText(reportText);
         
         showToast('✅ Excel скачан! Выберите получателя в Telegram');
         
+        // Предлагаем открыть Telegram для выбора получателя
         setTimeout(() => {
             tg.showConfirm('Excel-файл скачан и текст скопирован.\n\nОткрыть Telegram для выбора получателя?', (confirmed) => {
                 if (confirmed) {
