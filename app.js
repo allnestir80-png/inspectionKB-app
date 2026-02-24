@@ -127,10 +127,16 @@ function renderChecklist() {
                 </div>
                 <textarea class="comment-field" id="comment-${item.id}" placeholder="Опишите нарушение подробно..." rows="2"></textarea>
                 <div class="photo-upload">
-                    <label class="photo-btn">
-                        📷 Фото
-                        <input type="file" accept="image/*" capture="environment" onchange="handlePhoto('${item.id}', this)">
-                    </label>
+                    <div class="photo-buttons">
+                        <label class="photo-btn">
+                            📷 Камера
+                            <input type="file" accept="image/*" capture="camera" onchange="handlePhoto('${item.id}', this, 'camera')">
+                        </label>
+                        <label class="photo-btn">
+                            🖼️ Галерея
+                            <input type="file" accept="image/*" onchange="handlePhoto('${item.id}', this, 'gallery')">
+                        </label>
+                    </div>
                     <img class="photo-preview" id="photo-${item.id}">
                     <span class="photo-count" id="photo-count-${item.id}"></span>
                 </div>
@@ -198,29 +204,51 @@ function updateSectionCounters() {
 }
 
 // === PHOTO HANDLING ===
-async function handlePhoto(itemId, input) {
+async function handlePhoto(itemId, input, source) {
     const file = input.files[0];
     if (!file) return;
     
-    showToast('🔄 Сжатие фото...');
-    const compressedBlob = await compressImage(file);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const preview = document.getElementById(`photo-${itemId}`);
-        preview.src = e.target.result;
-        preview.classList.add('visible');
+    if (!file.type.startsWith('image/')) {
+        showToast('⚠️ Пожалуйста, выберите изображение');
+        input.value = '';
+        return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+        showToast('⚠️ Фото слишком большое (макс. 5MB)');
+        input.value = '';
+        return;
+    }
+    
+    showToast('🔄 Обработка фото...');
+    
+    try {
+        const compressedBlob = await compressImage(file, 1024, 0.75);
+        const reader = new FileReader();
         
-        if (!inspectionState.answers[itemId]) {
-            inspectionState.answers[itemId] = { status: 'ok', comment: '' };
-        }
-        inspectionState.answers[itemId].photo = e.target.result;
-        inspectionState.answers[itemId].photoName = `photo_${itemId.replace(/\./g, '_')}.jpg`;
+        reader.onload = (e) => {
+            const preview = document.getElementById(`photo-${itemId}`);
+            preview.src = e.target.result;
+            preview.classList.add('visible');
+            
+            if (!inspectionState.answers[itemId]) {
+                inspectionState.answers[itemId] = { status: 'ok', comment: '' };
+            }
+            inspectionState.answers[itemId].photo = e.target.result;
+            inspectionState.answers[itemId].photoName = `photo_${itemId.replace(/\./g, '_')}_${Date.now()}.jpg`;
+            
+            document.getElementById(`photo-count-${itemId}`).textContent = '✓ Фото добавлено';
+            showToast('✓ Фото сохранено');
+            autoSave();
+        };
         
-        document.getElementById(`photo-count-${itemId}`).textContent = '✓ Фото добавлено';
-        showToast('✓ Фото сохранено');
-        autoSave();
-    };
-    reader.readAsDataURL(compressedBlob);
+        reader.readAsDataURL(compressedBlob);
+        
+    } catch (error) {
+        showToast('⚠️ Ошибка загрузки фото');
+        console.error('Photo error:', error);
+    }
+    
     input.value = '';
 }
 
@@ -291,110 +319,100 @@ async function saveProgress() {
     }
 }
 
-// === SEND TO TELEGRAM ===
+// === SEND REPORT WITH EXCEL ===
 async function sendReport() {
     const storeNumber = document.getElementById('storeNumber').value.trim();
     
     if (!storeNumber) {
         showToast('⚠️ Введите номер магазина');
-        document.getElementById('storeNumber').focus();
         tg.showAlert('Введите номер магазина');
         return;
     }
     
     await saveProgress();
     
-    const reportData = {
-        inspectionId: inspectionState.inspectionId,
-        storeNumber: inspectionState.storeNumber,
-        storeAddress: inspectionState.storeAddress,
-        inspectorName: inspectionState.inspectorName,
-        inspectorId: inspectionState.inspectorId,
-        timestamp: inspectionState.timestamp,
-        checklistVersion: '1.0',
-        totalItems: CHECKLIST_DATA.reduce((sum, s) => sum + s.items.length, 0),
-        answers: inspectionState.answers
-    };
+    const violations = Object.values(inspectionState.answers).filter(a => a.status === 'fail').length;
+    const totalItems = CHECKLIST_DATA.reduce((sum, s) => sum + s.items.length, 0);
     
-    const violations = Object.values(reportData.answers).filter(a => a.status === 'fail').length;
-    
-    // Формируем текст для Telegram
-    const text = `📋 <b>ПРОВЕРКА МАГАЗИНА</b>
-
-🏪 <b>Магазин:</b> ${reportData.storeNumber}
-📍 <b>Адрес:</b> ${reportData.storeAddress || 'не указан'}
-👤 <b>Ревизор:</b> ${reportData.inspectorName || 'не указан'}
-🆔 <b>ID:</b> <code>${reportData.inspectorId || 'не указан'}</code>
-🕐 <b>Дата:</b> ${new Date(reportData.timestamp).toLocaleString('ru-RU')}
-
-📊 <b>Результаты:</b>
-Всего пунктов: ${reportData.totalItems}
-✅ Выполнено: ${reportData.totalItems - violations}
-❌ Нарушений: ${violations}
-
-Статус: ${violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ'}
-
-ID проверки: <code>${reportData.inspectionId}</code>`;
-    
-    // Отправка данных боту (через Telegram API)
-    const botToken = 'ВАШ_ТОКЕН_БОТА'; // Замените на ваш токен
-    const chatId = 'ВАШ_CHAT_ID'; // ID чата менеджера
-    
-    showToast('🔄 Отправка отчёта...');
+    showToast('🔄 Генерация Excel отчёта...');
     
     try {
-        // Отправляем текст
-        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: text,
-                parse_mode: 'HTML'
-            })
-        });
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Проверка');
         
-        // Отправляем фото (если есть)
-        const photos = Object.entries(inspectionState.answers).filter(([_, answer]) => answer.photo);
+        worksheet.columns = [
+            { header: 'Раздел', key: 'section', width: 30 },
+            { header: 'Пункт', key: 'item_id', width: 10 },
+            { header: 'Описание проверки', key: 'description', width: 60 },
+            { header: 'Статус', key: 'status', width: 15 },
+            { header: 'Комментарий', key: 'comment', width: 40 },
+            { header: 'Фото', key: 'photo', width: 10 }
+        ];
         
-        for (let [itemId, answer] of photos) {
-            const response = await fetch(answer.photo);
-            const blob = await response.blob();
-            const formData = new FormData();
-            formData.append('chat_id', chatId);
-            formData.append('photo', blob, `photo_${itemId.replace(/\./g, '_')}.jpg`);
-            formData.append('caption', `Пункт ${itemId}: ${answer.comment || ''}`);
-            
-            await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-                method: 'POST',
-                body: formData
+        worksheet.addRow(['Магазин:', storeNumber]).font = { bold: true };
+        worksheet.addRow(['Адрес:', inspectionState.storeAddress || 'не указан']);
+        worksheet.addRow(['Ревизор:', inspectionState.inspectorName || 'не указан']);
+        worksheet.addRow(['Дата:', new Date(inspectionState.timestamp).toLocaleString('ru-RU')]);
+        worksheet.addRow(['Всего пунктов:', totalItems]);
+        worksheet.addRow(['Нарушений:', violations]);
+        worksheet.addRow(['Статус:', violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ']);
+        worksheet.addRow([]);
+        
+        CHECKLIST_DATA.forEach(section => {
+            section.items.forEach(item => {
+                const answer = inspectionState.answers[item.id] || {};
+                const hasPhoto = answer.photo ? '📷' : '';
+                
+                worksheet.addRow({
+                    section: section.section,
+                    item_id: item.id,
+                    description: item.text,
+                    status: answer.status === 'ok' ? '✅ Норма' : (answer.status === 'fail' ? '❌ Нарушение' : ''),
+                    comment: answer.comment || '',
+                    photo: hasPhoto
+                });
             });
-        }
-        
-        // Отправляем JSON с данными
-        const jsonBlob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
-        const jsonFormData = new FormData();
-        jsonFormData.append('chat_id', chatId);
-        jsonFormData.append('document', jsonBlob, `inspection_${reportData.storeNumber}_${reportData.inspectionId}.json`);
-        
-        await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
-            method: 'POST',
-            body: jsonFormData
         });
         
-        showToast('✅ Отчёт отправлен в Telegram!');
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
         
-        // Используем нативную кнопку Telegram
-        tg.MainButton.setText('ОТЧЁТ ОТПРАВЛЕН ✓');
-        tg.MainButton.show();
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Проверка_${storeNumber}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        const reportText = `📋 ПРОВЕРКА МАГАЗИНА
+
+🏪 Магазин: ${storeNumber}
+👤 Ревизор: ${inspectionState.inspectorName || 'не указан'}
+📊 Нарушений: ${violations} из ${totalItems}
+📎 Excel-файл скачан
+
+${violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ'}
+
+Отправьте файл нужному получателю в Telegram.`;
+        
+        await navigator.clipboard.writeText(reportText);
+        
+        showToast('✅ Excel скачан! Выберите получателя в Telegram');
         
         setTimeout(() => {
-            tg.close();
-        }, 2000);
+            tg.showConfirm('Excel-файл скачан и текст скопирован.\n\nОткрыть Telegram для выбора получателя?', (confirmed) => {
+                if (confirmed) {
+                    window.open('https://t.me', '_blank');
+                }
+                tg.close();
+            });
+        }, 1500);
         
     } catch (error) {
-        showToast('⚠️ Ошибка отправки: ' + error.message);
-        tg.showAlert('Ошибка отправки: ' + error.message);
+        showToast('⚠️ Ошибка: ' + error.message);
+        console.error('Error:', error);
     }
 }
 
@@ -405,7 +423,6 @@ function updateProgress() {
     const progress = (completedItems / totalItems) * 100;
     document.getElementById('progressBar').style.width = `${progress}%`;
     
-    // Показываем главную кнопку Telegram при 100%
     if (progress === 100) {
         tg.MainButton.setText('📤 ОТПРАВИТЬ ОТЧЁТ');
         tg.MainButton.onClick(sendReport);
@@ -482,7 +499,6 @@ document.addEventListener('DOMContentLoaded', () => {
     renderChecklist();
     loadSavedInspection();
     
-    // Получаем данные из Telegram
     const user = tg.initDataUnsafe.user;
     if (user) {
         const inspectorName = `${user.first_name} ${user.last_name || ''}`.trim();
@@ -497,7 +513,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // Настройка цветов темы
     document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#f5f5f5');
     document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#1f2937');
     document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#2563eb');
@@ -505,7 +520,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#ffffff');
     document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#9ca3af');
     
-    // Haptic feedback
     document.querySelectorAll('.status-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             if (tg.HapticFeedback) {
