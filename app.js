@@ -1,27 +1,14 @@
 // ============================================================================
 // ЧЕК-ЛИСТ ПРОВЕРКИ ПОМЕЩЕНИЙ МАГАЗИНА
-// Версия: 2.1 (с исправлениями отладки)
+// Версия: 2.1 (Mobile Optimized)
 // ============================================================================
 
-console.log('🚀 App.js загружен');
+console.log('[APP] App.js загружен');
+console.log('[APP] User Agent:', navigator.userAgent);
 
 // === TELEGRAM WEB APP ===
 const tg = window.Telegram.WebApp;
-console.log('Telegram WebApp:', tg);
-
-// Инициализация
-tg.ready();
-tg.expand();
-console.log('Telegram WebApp готов');
-
-// Запрашиваем разрешения
-try {
-    tg.requestCameraAccess();
-    tg.requestWriteAccess();
-    console.log('Разрешения запрошены');
-} catch (e) {
-    console.warn('Не удалось запросить разрешения:', e);
-}
+console.log('[APP] Telegram WebApp объект:', tg ? 'доступен' : 'НЕ доступен');
 
 // === CHECKLIST DATA (36 пунктов) ===
 const CHECKLIST_DATA = [
@@ -93,7 +80,7 @@ const CHECKLIST_DATA = [
     }
 ];
 
-console.log('Чек-лист загружен:', CHECKLIST_DATA.length, 'разделов');
+console.log('[APP] CHECKLIST_DATA загружен:', CHECKLIST_DATA.length, 'разделов');
 
 // === STATE MANAGEMENT ===
 const inspectionState = {
@@ -114,86 +101,106 @@ const STORE_NAME = 'inspections';
 
 function initDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        
-        request.onupgradeneeded = (e) => {
-            console.log('Создание базы данных');
-            db = e.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                const store = db.createObjectStore(STORE_NAME, { keyPath: 'inspectionId' });
-                store.createIndex('storeNumber', 'storeNumber', { unique: false });
-                store.createIndex('timestamp', 'timestamp', { unique: false });
-                store.createIndex('inspectorId', 'inspectorId', { unique: false });
-            }
-        };
-        
-        request.onsuccess = (e) => {
-            db = e.target.result;
-            console.log('База данных инициализирована');
-            resolve(db);
-        };
-        
-        request.onerror = (e) => {
-            console.error('Ошибка базы данных:', e);
-            reject(e);
-        };
+        try {
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
+            
+            request.onupgradeneeded = (e) => {
+                console.log('[DB] Создание базы данных');
+                db = e.target.result;
+                if (!db.objectStoreNames.contains(STORE_NAME)) {
+                    const store = db.createObjectStore(STORE_NAME, { keyPath: 'inspectionId' });
+                    store.createIndex('storeNumber', 'storeNumber', { unique: false });
+                    store.createIndex('timestamp', 'timestamp', { unique: false });
+                    store.createIndex('inspectorId', 'inspectorId', { unique: false });
+                }
+            };
+            
+            request.onsuccess = (e) => {
+                db = e.target.result;
+                console.log('[DB] База данных инициализирована');
+                resolve(db);
+            };
+            
+            request.onerror = (e) => {
+                console.error('[DB] Ошибка базы данных:', e);
+                reject(e);
+            };
+        } catch (err) {
+            console.error('[DB] Критическая ошибка:', err);
+            reject(err);
+        }
     });
 }
 
 // === UI RENDER ===
 function renderChecklist() {
-    console.log('Рендеринг чек-листа...');
+    console.log('[UI] Начало рендеринга чек-листа...');
+    
     const container = document.getElementById('checklistContainer');
+    const loadingIndicator = document.getElementById('loadingIndicator');
     
     if (!container) {
-        console.error('Контейнер checklistContainer не найден!');
+        console.error('[UI] Контейнер checklistContainer НЕ найден!');
         return;
     }
     
-    container.innerHTML = '';
-    
-    CHECKLIST_DATA.forEach((section, sectionIndex) => {
-        const sectionEl = document.createElement('div');
-        sectionEl.className = 'section';
-        const completedInSection = countCompletedInSection(section.items);
+    try {
+        container.innerHTML = '';
         
-        sectionEl.innerHTML = `
-            <div class="section-header">
-                <h3>${section.section} <span class="section-counter">${completedInSection}/${section.items.length}</span></h3>
-                <p>${section.description}</p>
-            </div>
-            <div id="section-${sectionIndex}"></div>
-        `;
-        
-        container.appendChild(sectionEl);
-        
-        const itemsContainer = sectionEl.querySelector(`#section-${sectionIndex}`);
-        
-        section.items.forEach((item) => {
-            const itemEl = document.createElement('div');
-            itemEl.className = 'item';
-            itemEl.innerHTML = `
-                <div class="item-id">Пункт ${item.id}</div>
-                <div class="item-text">${item.text}</div>
-                <div class="status-toggle">
-                    <button class="status-btn ok" onclick="setStatus('${item.id}', 'ok', this)">✅ Норма</button>
-                    <button class="status-btn fail" onclick="setStatus('${item.id}', 'fail', this)">❌ Нарушение</button>
+        CHECKLIST_DATA.forEach((section, sectionIndex) => {
+            const sectionEl = document.createElement('div');
+            sectionEl.className = 'section';
+            const completedInSection = countCompletedInSection(section.items);
+            
+            sectionEl.innerHTML = `
+                <div class="section-header">
+                    <h3>${section.section} <span class="section-counter">${completedInSection}/${section.items.length}</span></h3>
+                    <p>${section.description}</p>
                 </div>
-                <textarea class="comment-field" id="comment-${item.id}" placeholder="Опишите нарушение подробно..." rows="2"></textarea>
-                <div class="photo-upload">
-                    <button class="photo-btn" onclick="selectPhoto('${item.id}')">
-                        📷 Добавить фото
-                    </button>
-                    <img class="photo-preview" id="photo-${item.id}">
-                    <span class="photo-count" id="photo-count-${item.id}"></span>
-                </div>
+                <div id="section-${sectionIndex}"></div>
             `;
-            itemsContainer.appendChild(itemEl);
+            
+            container.appendChild(sectionEl);
+            
+            const itemsContainer = sectionEl.querySelector(`#section-${sectionIndex}`);
+            
+            section.items.forEach((item) => {
+                const itemEl = document.createElement('div');
+                itemEl.className = 'item';
+                itemEl.innerHTML = `
+                    <div class="item-id">Пункт ${item.id}</div>
+                    <div class="item-text">${item.text}</div>
+                    <div class="status-toggle">
+                        <button class="status-btn ok" onclick="setStatus('${item.id}', 'ok', this)">✅ Норма</button>
+                        <button class="status-btn fail" onclick="setStatus('${item.id}', 'fail', this)">❌ Нарушение</button>
+                    </div>
+                    <textarea class="comment-field" id="comment-${item.id}" placeholder="Опишите нарушение подробно..." rows="2"></textarea>
+                    <div class="photo-upload">
+                        <button class="photo-btn" onclick="selectPhoto('${item.id}')">
+                            📷 Добавить фото
+                        </button>
+                        <img class="photo-preview" id="photo-${item.id}">
+                        <span class="photo-count" id="photo-count-${item.id}"></span>
+                    </div>
+                `;
+                itemsContainer.appendChild(itemEl);
+            });
         });
-    });
-    
-    console.log('Чек-лист отрисован');
-    updateProgress();
+        
+        // Скрываем индикатор загрузки
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+        }
+        
+        console.log('[UI] Чек-лист успешно отрисован');
+        updateProgress();
+        
+    } catch (err) {
+        console.error('[UI] Ошибка рендеринга:', err);
+        if (loadingIndicator) {
+            loadingIndicator.innerHTML = '<span style="color: #ef4444;">❌ Ошибка загрузки чек-листа</span>';
+        }
+    }
 }
 
 function countCompletedInSection(items) {
@@ -205,6 +212,8 @@ function countCompletedInSection(items) {
 
 // === STATUS HANDLING ===
 function setStatus(itemId, status, btnElement) {
+    console.log('[STATUS] Пункт:', itemId, 'Статус:', status);
+    
     const parent = btnElement.parentElement;
     parent.querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
     btnElement.classList.add('active');
@@ -251,9 +260,8 @@ let currentPhotoItemId = null;
 
 function selectPhoto(itemId) {
     currentPhotoItemId = itemId;
-    console.log('Выбор фото для пункта:', itemId);
+    console.log('[PHOTO] Выбор фото для пункта:', itemId);
     
-    // Показываем выбор через Telegram или стандартный input
     tg.showPopup({
         title: '📷 Добавить фото',
         message: 'Выберите способ добавления фото',
@@ -377,7 +385,7 @@ async function saveProgress() {
         const completedItems = Object.keys(inspectionState.answers).length;
         showToast(`💾 Сохранено (${completedItems}/${totalItems})`);
     } catch (err) {
-        console.error('Ошибка сохранения:', err);
+        console.error('[SAVE] Ошибка сохранения:', err);
         showToast('⚠️ Ошибка сохранения');
     }
 }
@@ -487,7 +495,7 @@ ID: ${inspectionState.inspectionId}`;
             await navigator.clipboard.writeText(reportText);
             showToast('✅ Текст скопирован!');
         } catch (err) {
-            console.error('Clipboard error:', err);
+            console.error('[CLIPBOARD] Ошибка:', err);
         }
         
         setTimeout(() => {
@@ -508,7 +516,7 @@ ID: ${inspectionState.inspectionId}`;
         }, 1000);
         
     } catch (error) {
-        console.error('Error:', error);
+        console.error('[REPORT] Ошибка:', error);
         showToast('⚠️ Ошибка: ' + error.message);
         tg.showAlert('Ошибка генерации отчёта:\n' + error.message);
     }
@@ -520,7 +528,10 @@ function updateProgress() {
     const completedItems = Object.keys(inspectionState.answers).length;
     const progress = (completedItems / totalItems) * 100;
     
-    document.getElementById('progressBar').style.width = `${progress}%`;
+    const progressBar = document.getElementById('progressBar');
+    if (progressBar) {
+        progressBar.style.width = `${progress}%`;
+    }
     
     if (progress === 100) {
         tg.MainButton.setText('📤 ОТПРАВИТЬ ОТЧЁТ');
@@ -539,7 +550,7 @@ function showToast(message) {
         toast.classList.add('visible');
         setTimeout(() => toast.classList.remove('visible'), 2500);
     } else {
-        console.log('Toast:', message);
+        console.log('[TOAST]', message);
     }
 }
 
@@ -600,24 +611,31 @@ async function loadSavedInspection() {
             }
         };
     } catch (err) {
-        console.error('Load error:', err);
+        console.error('[LOAD] Ошибка загрузки:', err);
     }
 }
 
 // === INITIALIZATION ===
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM загружен');
+function initializeApp() {
+    console.log('[INIT] Инициализация приложения...');
     
     // Проверяем Telegram WebApp
     if (!tg) {
-        console.error('Telegram WebApp не доступен!');
+        console.error('[INIT] Telegram WebApp НЕ доступен!');
         showToast('⚠️ Ошибка: Telegram WebApp не загружен');
+        document.getElementById('headerInfo').textContent = 'Ревизор: ошибка инициализации';
     } else {
-        console.log('Telegram WebApp доступен');
+        console.log('[INIT] Telegram WebApp доступен');
+        console.log('[INIT] Telegram версия:', tg.version);
+        console.log('[INIT] Telegram платформа:', tg.platform);
+        
+        // Ждём полной инициализации Telegram
+        tg.ready();
+        tg.expand();
         
         // Получаем данные пользователя
         const user = tg.initDataUnsafe.user;
-        console.log('User data:', user);
+        console.log('[INIT] User data:', user);
         
         if (user) {
             const inspectorName = `${user.first_name} ${user.last_name || ''}`.trim();
@@ -634,19 +652,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 inspectionState.inspectorId = userId;
             }
         } else {
-            console.warn('Данные пользователя не получены');
+            console.warn('[INIT] Данные пользователя не получены');
             document.getElementById('headerInfo').textContent = 'Ревизор: не авторизован';
         }
-    }
-    
-    // Применяем тему Telegram
-    if (tg.themeParams) {
-        document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#f5f5f5');
-        document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#1f2937');
-        document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#2563eb');
-        document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
-        document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#ffffff');
-        document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#9ca3af');
+        
+        // Применяем тему Telegram
+        if (tg.themeParams) {
+            document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#f5f5f5');
+            document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#1f2937');
+            document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#2563eb');
+            document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
+            document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#ffffff');
+            document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#9ca3af');
+        }
     }
     
     // Рендерим чек-лист
@@ -655,5 +673,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // Загружаем сохранённые данные
     loadSavedInspection();
     
-    console.log('Инициализация завершена');
-});
+    console.log('[INIT] Инициализация завершена');
+}
+
+// === ЗАПУСК ПРИЛОЖЕНИЯ ===
+// Для Android важно ждать полной загрузки DOM
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('[INIT] DOMContentLoaded');
+        setTimeout(initializeApp, 100); // Небольшая задержка для стабильности
+    });
+} else {
+    console.log('[INIT] DOM уже загружен');
+    setTimeout(initializeApp, 100);
+}
