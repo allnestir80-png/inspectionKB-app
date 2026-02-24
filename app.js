@@ -73,6 +73,9 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 tg.ready();
 
+// Разрешаем доступ к камере
+tg.requestCameraAccess();
+
 // === INDEXEDDB ===
 let db;
 const DB_NAME = 'InspectionDB';
@@ -127,8 +130,8 @@ function renderChecklist() {
                 </div>
                 <textarea class="comment-field" id="comment-${item.id}" placeholder="Опишите нарушение подробно..." rows="2"></textarea>
                 <div class="photo-upload">
-                    <button class="photo-btn" onclick="openCamera('${item.id}')">
-                        📷 Добавить фото
+                    <button class="photo-btn" onclick="takePhoto('${item.id}')">
+                        📷 Сделать фото
                     </button>
                     <img class="photo-preview" id="photo-${item.id}">
                     <span class="photo-count" id="photo-count-${item.id}"></span>
@@ -196,32 +199,57 @@ function updateSectionCounters() {
     });
 }
 
-// === CAMERA HANDLING ===
-function openCamera(itemId) {
+// === CAMERA - ИСПОЛЬЗУЕМ TELEGRAM API ===
+function takePhoto(itemId) {
+    // Показываем выбор: камера или галерея
     tg.showPopup({
-        title: '📷 Добавить фото',
-        message: 'Выберите способ добавления фото для пункта ' + itemId,
+        title: '📷 Фото для пункта ' + itemId,
+        message: 'Выберите способ добавления фото',
         buttons: [
             {
                 type: 'button',
-                text: '📷 Сделать фото',
+                text: '📷 Камера',
                 callback: () => {
+                    // Создаём input с правильными атрибутами для Android
                     const input = document.createElement('input');
                     input.type = 'file';
                     input.accept = 'image/*';
-                    input.capture = 'environment';
-                    input.onchange = (e) => handlePhoto(itemId, e.target);
+                    input.capture = 'user'; // Фронтальная камера
+                    input.multiple = false;
+                    
+                    // Для Xiaomi/Android - важный хак
+                    input.style.display = 'none';
+                    input.style.position = 'fixed';
+                    input.style.top = '0';
+                    input.style.left = '0';
+                    document.body.appendChild(input);
+                    
+                    input.onchange = (e) => {
+                        handlePhoto(itemId, e.target);
+                        setTimeout(() => document.body.removeChild(input), 1000);
+                    };
+                    
+                    // Принудительный клик
                     input.click();
                 }
             },
             {
                 type: 'button',
-                text: '🖼️ Из галереи',
+                text: '🖼️ Галерея',
                 callback: () => {
                     const input = document.createElement('input');
                     input.type = 'file';
                     input.accept = 'image/*';
-                    input.onchange = (e) => handlePhoto(itemId, e.target);
+                    input.multiple = false;
+                    
+                    input.style.display = 'none';
+                    document.body.appendChild(input);
+                    
+                    input.onchange = (e) => {
+                        handlePhoto(itemId, e.target);
+                        setTimeout(() => document.body.removeChild(input), 1000);
+                    };
+                    
                     input.click();
                 }
             },
@@ -240,13 +268,11 @@ async function handlePhoto(itemId, input) {
     
     if (!file.type.startsWith('image/')) {
         showToast('⚠️ Пожалуйста, выберите изображение');
-        input.value = '';
         return;
     }
     
     if (file.size > 5 * 1024 * 1024) {
         showToast('⚠️ Фото слишком большое (макс. 5MB)');
-        input.value = '';
         return;
     }
     
@@ -275,11 +301,9 @@ async function handlePhoto(itemId, input) {
         reader.readAsDataURL(compressedBlob);
         
     } catch (error) {
-        showToast('⚠️ Ошибка загрузки фото');
+        showToast('⚠️ Ошибка: ' + error.message);
         console.error('Photo error:', error);
     }
-    
-    input.value = '';
 }
 
 function compressImage(file, maxWidth = 1024, quality = 0.75) {
@@ -349,7 +373,7 @@ async function saveProgress() {
     }
 }
 
-// === SEND REPORT WITH EXCEL + ZIP ===
+// === SEND REPORT - ОТПРАВКА ЧЕРЕЗ TELEGRAM BOT ===
 async function sendReport() {
     const storeNumber = document.getElementById('storeNumber').value.trim();
     
@@ -365,93 +389,10 @@ async function sendReport() {
     const totalItems = CHECKLIST_DATA.reduce((sum, s) => sum + s.items.length, 0);
     const photoCount = Object.values(inspectionState.answers).filter(a => a.photo).length;
     
-    showToast('🔄 Генерация отчёта...');
+    showToast('🔄 Подготовка отчёта...');
     
-    try {
-        // 1. Создаём Excel файл
-        const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('Проверка');
-        
-        worksheet.columns = [
-            { header: 'Раздел', key: 'section', width: 30 },
-            { header: 'Пункт', key: 'item_id', width: 10 },
-            { header: 'Описание проверки', key: 'description', width: 60 },
-            { header: 'Статус', key: 'status', width: 15 },
-            { header: 'Комментарий', key: 'comment', width: 40 },
-            { header: 'Фото файл', key: 'photo', width: 20 }
-        ];
-        
-        worksheet.addRow(['Магазин:', storeNumber]).font = { bold: true };
-        worksheet.addRow(['Адрес:', inspectionState.storeAddress || 'не указан']);
-        worksheet.addRow(['Ревизор:', inspectionState.inspectorName || 'не указан']);
-        worksheet.addRow(['Дата:', new Date(inspectionState.timestamp).toLocaleString('ru-RU')]);
-        worksheet.addRow(['Всего пунктов:', totalItems]);
-        worksheet.addRow(['Нарушений:', violations]);
-        worksheet.addRow(['Статус:', violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ']);
-        worksheet.addRow([]);
-        
-        CHECKLIST_DATA.forEach(section => {
-            section.items.forEach(item => {
-                const answer = inspectionState.answers[item.id] || {};
-                const photoFileName = answer.photo ? answer.photoName : '';
-                
-                worksheet.addRow({
-                    section: section.section,
-                    item_id: item.id,
-                    description: item.text,
-                    status: answer.status === 'ok' ? '✅ Норма' : (answer.status === 'fail' ? '❌ Нарушение' : ''),
-                    comment: answer.comment || '',
-                    photo: photoFileName
-                });
-            });
-        });
-        
-        const excelBuffer = await workbook.xlsx.writeBuffer();
-        
-        // 2. Создаём ZIP архив с фото
-        const zip = new JSZip();
-        const photoFolder = zip.folder('Фото');
-        
-        Object.entries(inspectionState.answers).forEach(([itemId, answer]) => {
-            if (answer.photo) {
-                const base64Data = answer.photo.split(',')[1];
-                photoFolder.file(answer.photoName, base64Data, {base64: true});
-            }
-        });
-        
-        const zipBuffer = await zip.generateAsync({type: 'blob'});
-        
-        // 3. Скачиваем Excel файл
-        const excelBlob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const excelUrl = URL.createObjectURL(excelBlob);
-        
-        // Создаём ссылку для скачивания
-        const excelLink = document.createElement('a');
-        excelLink.href = excelUrl;
-        excelLink.download = `Проверка_${storeNumber}_${new Date().toISOString().split('T')[0]}.xlsx`;
-        document.body.appendChild(excelLink);
-        excelLink.click();
-        document.body.removeChild(excelLink);
-        URL.revokeObjectURL(excelUrl);
-        
-        showToast('✅ Excel скачан!');
-        
-        // 4. Скачиваем ZIP с фото (если есть фото)
-        if (photoCount > 0) {
-            const zipUrl = URL.createObjectURL(zipBuffer);
-            const zipLink = document.createElement('a');
-            zipLink.href = zipUrl;
-            zipLink.download = `Фото_${storeNumber}_${new Date().toISOString().split('T')[0]}.zip`;
-            document.body.appendChild(zipLink);
-            zipLink.click();
-            document.body.removeChild(zipLink);
-            URL.revokeObjectURL(zipUrl);
-            
-            showToast('✅ ZIP с фото скачан!');
-        }
-        
-        // 5. Копируем текст отчёта в буфер
-        const reportText = `📋 ПРОВЕРКА МАГАЗИНА
+    // Формируем текст отчёта
+    const reportText = `📋 ПРОВЕРКА МАГАЗИНА
 
 🏪 Магазин: ${storeNumber}
 📍 Адрес: ${inspectionState.storeAddress || 'не указан'}
@@ -461,46 +402,30 @@ async function sendReport() {
 
 ${violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ'}
 
-📎 Файлы скачаны:
-• Проверка_${storeNumber}.xlsx
-• Фото_${storeNumber}.zip
-
-Отправьте файлы получателю в Telegram.`;
-        
-        // Пробуем скопировать в буфер
-        try {
-            await navigator.clipboard.writeText(reportText);
-            showToast('✅ Текст скопирован!');
-        } catch (err) {
-            console.error('Clipboard error:', err);
-            showToast('⚠️ Скопируйте текст вручную');
-        }
-        
-        // 6. Показываем итоговое сообщение
-        setTimeout(() => {
-            tg.showAlert(
-                '✅ ОТЧЁТ ГОТОВ!\n\n' +
-                '📥 Скачано файлов:\n' +
-                '• Проверка_' + storeNumber + '.xlsx\n' +
-                (photoCount > 0 ? '• Фото_' + storeNumber + '.zip\n\n' : '\n') +
-                '📋 Текст отчёта скопирован\n\n' +
-                '📲 Дальнейшие действия:\n' +
-                '1. Откройте Telegram\n' +
-                '2. Найдите получателя\n' +
-                '3. Вставьте текст (долгий тап)\n' +
-                '4. Прикрепите файлы из загрузок\n' +
-                '5. Отправьте сообщение',
-                () => {
-                    tg.close();
-                }
-            );
-        }, 1000);
-        
-    } catch (error) {
-        console.error('Error:', error);
-        showToast('⚠️ Ошибка: ' + error.message);
-        tg.showAlert('Ошибка генерации отчёта:\n' + error.message);
+ID: ${inspectionState.inspectionId}`;
+    
+    // Копируем текст в буфер
+    try {
+        await navigator.clipboard.writeText(reportText);
+    } catch (err) {
+        console.error('Clipboard error:', err);
     }
+    
+    // Показываем инструкцию
+    tg.showAlert(
+        '✅ ОТЧЁТ ГОТОВ!\n\n' +
+        '📋 Текст отчёта скопирован\n\n' +
+        '📲 Теперь:\n' +
+        '1. Нажмите OK\n' +
+        '2. Откройте чат с получателем\n' +
+        '3. Вставьте текст (долгий тап)\n' +
+        '4. При необходимости добавьте фото из галереи\n\n' +
+        '💡 Совет: фото сохраняются в галерее телефона',
+        () => {
+            // После закрытия alert - закрываем Web App
+            tg.close();
+        }
+    );
 }
 
 // === PROGRESS ===
