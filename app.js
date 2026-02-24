@@ -73,8 +73,9 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 tg.ready();
 
-// Разрешаем доступ к камере
+// Запрашиваем разрешения
 tg.requestCameraAccess();
+tg.requestWriteAccess();
 
 // === INDEXEDDB ===
 let db;
@@ -130,8 +131,8 @@ function renderChecklist() {
                 </div>
                 <textarea class="comment-field" id="comment-${item.id}" placeholder="Опишите нарушение подробно..." rows="2"></textarea>
                 <div class="photo-upload">
-                    <button class="photo-btn" onclick="takePhoto('${item.id}')">
-                        📷 Сделать фото
+                    <button class="photo-btn" onclick="selectPhoto('${item.id}')">
+                        📷 Добавить фото
                     </button>
                     <img class="photo-preview" id="photo-${item.id}">
                     <span class="photo-count" id="photo-count-${item.id}"></span>
@@ -199,73 +200,109 @@ function updateSectionCounters() {
     });
 }
 
-// === CAMERA - ИСПОЛЬЗУЕМ TELEGRAM API ===
-function takePhoto(itemId) {
-    // Показываем выбор: камера или галерея
-    tg.showPopup({
-        title: '📷 Фото для пункта ' + itemId,
-        message: 'Выберите способ добавления фото',
-        buttons: [
-            {
-                type: 'button',
-                text: '📷 Камера',
-                callback: () => {
-                    // Создаём input с правильными атрибутами для Android
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = 'image/*';
-                    input.capture = 'user'; // Фронтальная камера
-                    input.multiple = false;
-                    
-                    // Для Xiaomi/Android - важный хак
-                    input.style.display = 'none';
-                    input.style.position = 'fixed';
-                    input.style.top = '0';
-                    input.style.left = '0';
-                    document.body.appendChild(input);
-                    
-                    input.onchange = (e) => {
-                        handlePhoto(itemId, e.target);
-                        setTimeout(() => document.body.removeChild(input), 1000);
-                    };
-                    
-                    // Принудительный клик
-                    input.click();
-                }
-            },
-            {
-                type: 'button',
-                text: '🖼️ Галерея',
-                callback: () => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = 'image/*';
-                    input.multiple = false;
-                    
-                    input.style.display = 'none';
-                    document.body.appendChild(input);
-                    
-                    input.onchange = (e) => {
-                        handlePhoto(itemId, e.target);
-                        setTimeout(() => document.body.removeChild(input), 1000);
-                    };
-                    
-                    input.click();
-                }
-            },
-            {
-                type: 'cancel',
-                text: 'Отмена'
+// === PHOTO - TELEGRAM NATIVE MEDIA PICKER ===
+let currentPhotoItemId = null;
+
+function selectPhoto(itemId) {
+    currentPhotoItemId = itemId;
+    
+    // Проверяем поддержку Telegram Media Picker
+    if (tg.MediaPicker && tg.MediaPicker.pickMedia) {
+        // Используем нативный Telegram picker (работает на Android!)
+        tg.MediaPicker.pickMedia({
+            mediaType: 'photo',
+            maxCount: 1
+        }).then((media) => {
+            if (media && media.length > 0) {
+                handleTelegramMedia(itemId, media[0]);
             }
-        ]
-    });
+        }).catch((err) => {
+            console.error('Telegram MediaPicker error:', err);
+            // Фоллбэк на стандартный input
+            fallbackToFileInput(itemId);
+        });
+    } else {
+        // Фоллбэк на стандартный input
+        fallbackToFileInput(itemId);
+    }
 }
 
-// === PHOTO HANDLING ===
-async function handlePhoto(itemId, input) {
-    const file = input.files[0];
-    if (!file) return;
+// Фоллбэк функция для старых версий Telegram
+function fallbackToFileInput(itemId) {
+    currentPhotoItemId = itemId;
     
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    input.style.position = 'fixed';
+    input.style.top = '0';
+    input.style.left = '0';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            handlePhotoFile(itemId, file);
+        }
+        setTimeout(() => {
+            if (document.body.contains(input)) {
+                document.body.removeChild(input);
+            }
+        }, 1000);
+    };
+    
+    input.onerror = () => {
+        showToast('⚠️ Ошибка выбора фото');
+        if (document.body.contains(input)) {
+            document.body.removeChild(input);
+        }
+    };
+    
+    // Принудительный клик
+    setTimeout(() => {
+        input.click();
+    }, 100);
+}
+
+// Обработка фото из Telegram Media Picker
+function handleTelegramMedia(itemId, media) {
+    showToast('🔄 Загрузка фото...');
+    
+    // Telegram возвращает file_id или URL
+    if (media.file_id) {
+        // Получаем файл через Telegram API
+        tg.getFile(media.file_id).then((file) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                savePhoto(itemId, e.target.result);
+            };
+            reader.readAsDataURL(file.blob);
+        }).catch((err) => {
+            console.error('GetFile error:', err);
+            fallbackToFileInput(itemId);
+        });
+    } else if (media.url) {
+        // Загружаем по URL
+        fetch(media.url)
+            .then(res => res.blob())
+            .then(blob => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    savePhoto(itemId, e.target.result);
+                };
+                reader.readAsDataURL(blob);
+            })
+            .catch((err) => {
+                console.error('Fetch error:', err);
+                fallbackToFileInput(itemId);
+            });
+    }
+}
+
+// Обработка фото из стандартного input
+function handlePhotoFile(itemId, file) {
     if (!file.type.startsWith('image/')) {
         showToast('⚠️ Пожалуйста, выберите изображение');
         return;
@@ -278,57 +315,31 @@ async function handlePhoto(itemId, input) {
     
     showToast('🔄 Обработка фото...');
     
-    try {
-        const compressedBlob = await compressImage(file, 1024, 0.75);
-        const reader = new FileReader();
-        
-        reader.onload = (e) => {
-            const preview = document.getElementById(`photo-${itemId}`);
-            preview.src = e.target.result;
-            preview.classList.add('visible');
-            
-            if (!inspectionState.answers[itemId]) {
-                inspectionState.answers[itemId] = { status: 'ok', comment: '' };
-            }
-            inspectionState.answers[itemId].photo = e.target.result;
-            inspectionState.answers[itemId].photoName = `punkt_${itemId.replace(/\./g, '_')}.jpg`;
-            
-            document.getElementById(`photo-count-${itemId}`).textContent = '✓ Фото добавлено';
-            showToast('✓ Фото сохранено');
-            autoSave();
-        };
-        
-        reader.readAsDataURL(compressedBlob);
-        
-    } catch (error) {
-        showToast('⚠️ Ошибка: ' + error.message);
-        console.error('Photo error:', error);
-    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        savePhoto(itemId, e.target.result);
+    };
+    reader.onerror = () => {
+        showToast('⚠️ Ошибка чтения файла');
+    };
+    reader.readAsDataURL(file);
 }
 
-function compressImage(file, maxWidth = 1024, quality = 0.75) {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let width = img.width;
-                let height = img.height;
-                if (width > maxWidth) {
-                    height = Math.round((maxWidth / width) * height);
-                    width = maxWidth;
-                }
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-                canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
-            };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-    });
+// Сохранение фото в состояние
+function savePhoto(itemId, base64Data) {
+    const preview = document.getElementById(`photo-${itemId}`);
+    preview.src = base64Data;
+    preview.classList.add('visible');
+    
+    if (!inspectionState.answers[itemId]) {
+        inspectionState.answers[itemId] = { status: 'ok', comment: '' };
+    }
+    inspectionState.answers[itemId].photo = base64Data;
+    inspectionState.answers[itemId].photoName = `punkt_${itemId.replace(/\./g, '_')}.jpg`;
+    
+    document.getElementById(`photo-count-${itemId}`).textContent = '✓ Фото добавлено';
+    showToast('✓ Фото сохранено');
+    autoSave();
 }
 
 // === AUTO-SAVE ===
@@ -373,7 +384,7 @@ async function saveProgress() {
     }
 }
 
-// === SEND REPORT - ОТПРАВКА ЧЕРЕЗ TELEGRAM BOT ===
+// === SEND REPORT ===
 async function sendReport() {
     const storeNumber = document.getElementById('storeNumber').value.trim();
     
@@ -391,7 +402,6 @@ async function sendReport() {
     
     showToast('🔄 Подготовка отчёта...');
     
-    // Формируем текст отчёта
     const reportText = `📋 ПРОВЕРКА МАГАЗИНА
 
 🏪 Магазин: ${storeNumber}
@@ -404,14 +414,12 @@ ${violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУ
 
 ID: ${inspectionState.inspectionId}`;
     
-    // Копируем текст в буфер
     try {
         await navigator.clipboard.writeText(reportText);
     } catch (err) {
         console.error('Clipboard error:', err);
     }
     
-    // Показываем инструкцию
     tg.showAlert(
         '✅ ОТЧЁТ ГОТОВ!\n\n' +
         '📋 Текст отчёта скопирован\n\n' +
@@ -419,10 +427,9 @@ ID: ${inspectionState.inspectionId}`;
         '1. Нажмите OK\n' +
         '2. Откройте чат с получателем\n' +
         '3. Вставьте текст (долгий тап)\n' +
-        '4. При необходимости добавьте фото из галереи\n\n' +
-        '💡 Совет: фото сохраняются в галерее телефона',
+        '4. Прикрепите фото из галереи (если есть)\n\n' +
+        '💡 Фото сохраняются в приложении автоматически',
         () => {
-            // После закрытия alert - закрываем Web App
             tg.close();
         }
     );
