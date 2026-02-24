@@ -1,4 +1,4 @@
-const CACHE_NAME = 'telegram-inspection-v1.1';
+const CACHE_NAME = 'telegram-inspection-v2.0';
 const ASSETS = [
     './',
     './index.html',
@@ -27,5 +27,4 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
         caches.match(e.request).then((response) => response || fetch(e.request))
     );
-
 });
