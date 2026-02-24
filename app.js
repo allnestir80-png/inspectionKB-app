@@ -127,16 +127,10 @@ function renderChecklist() {
                 </div>
                 <textarea class="comment-field" id="comment-${item.id}" placeholder="Опишите нарушение подробно..." rows="2"></textarea>
                 <div class="photo-upload">
-                    <div class="photo-buttons">
-                        <label class="photo-btn">
-                            📷 Камера
-                            <input type="file" accept="image/*" capture="camera" onchange="handlePhoto('${item.id}', this, 'camera')">
-                        </label>
-                        <label class="photo-btn">
-                            🖼️ Галерея
-                            <input type="file" accept="image/*" onchange="handlePhoto('${item.id}', this, 'gallery')">
-                        </label>
-                    </div>
+                    <label class="photo-btn">
+                        📷 Фото
+                        <input type="file" accept="image/*" capture="environment" onchange="handlePhoto('${item.id}', this)">
+                    </label>
                     <img class="photo-preview" id="photo-${item.id}">
                     <span class="photo-count" id="photo-count-${item.id}"></span>
                 </div>
@@ -204,7 +198,7 @@ function updateSectionCounters() {
 }
 
 // === PHOTO HANDLING ===
-async function handlePhoto(itemId, input, source) {
+async function handlePhoto(itemId, input) {
     const file = input.files[0];
     if (!file) return;
     
@@ -234,8 +228,9 @@ async function handlePhoto(itemId, input, source) {
             if (!inspectionState.answers[itemId]) {
                 inspectionState.answers[itemId] = { status: 'ok', comment: '' };
             }
+            // Сохраняем фото с именем пункта
             inspectionState.answers[itemId].photo = e.target.result;
-            inspectionState.answers[itemId].photoName = `photo_${itemId.replace(/\./g, '_')}_${Date.now()}.jpg`;
+            inspectionState.answers[itemId].photoName = `punkt_${itemId.replace(/\./g, '_')}.jpg`;
             
             document.getElementById(`photo-count-${itemId}`).textContent = '✓ Фото добавлено';
             showToast('✓ Фото сохранено');
@@ -319,7 +314,7 @@ async function saveProgress() {
     }
 }
 
-// === SEND REPORT WITH EXCEL ===
+// === SEND REPORT WITH EXCEL + ZIP ===
 async function sendReport() {
     const storeNumber = document.getElementById('storeNumber').value.trim();
     
@@ -333,25 +328,24 @@ async function sendReport() {
     
     const violations = Object.values(inspectionState.answers).filter(a => a.status === 'fail').length;
     const totalItems = CHECKLIST_DATA.reduce((sum, s) => sum + s.items.length, 0);
+    const photoCount = Object.values(inspectionState.answers).filter(a => a.photo).length;
     
-    showToast('🔄 Генерация Excel отчёта...');
+    showToast('🔄 Генерация отчёта...');
     
     try {
-        // Создаём Excel файл
+        // 1. Создаём Excel файл
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet('Проверка');
         
-        // Настройка колонок
         worksheet.columns = [
             { header: 'Раздел', key: 'section', width: 30 },
             { header: 'Пункт', key: 'item_id', width: 10 },
             { header: 'Описание проверки', key: 'description', width: 60 },
             { header: 'Статус', key: 'status', width: 15 },
             { header: 'Комментарий', key: 'comment', width: 40 },
-            { header: 'Фото', key: 'photo', width: 10 }
+            { header: 'Фото файл', key: 'photo', width: 20 }
         ];
         
-        // Заголовок отчёта
         worksheet.addRow(['Магазин:', storeNumber]).font = { bold: true };
         worksheet.addRow(['Адрес:', inspectionState.storeAddress || 'не указан']);
         worksheet.addRow(['Ревизор:', inspectionState.inspectorName || 'не указан']);
@@ -361,11 +355,10 @@ async function sendReport() {
         worksheet.addRow(['Статус:', violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ']);
         worksheet.addRow([]);
         
-        // Данные чек-листа
         CHECKLIST_DATA.forEach(section => {
             section.items.forEach(item => {
                 const answer = inspectionState.answers[item.id] || {};
-                const hasPhoto = answer.photo ? '📷' : '';
+                const photoFileName = answer.photo ? answer.photoName : '';
                 
                 worksheet.addRow({
                     section: section.section,
@@ -373,45 +366,71 @@ async function sendReport() {
                     description: item.text,
                     status: answer.status === 'ok' ? '✅ Норма' : (answer.status === 'fail' ? '❌ Нарушение' : ''),
                     comment: answer.comment || '',
-                    photo: hasPhoto
+                    photo: photoFileName
                 });
             });
         });
         
-        // Генерируем Excel файл
-        const buffer = await workbook.xlsx.writeBuffer();
-        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const url = URL.createObjectURL(blob);
+        const excelBuffer = await workbook.xlsx.writeBuffer();
         
-        // Создаём ссылку для скачивания
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Проверка_${storeNumber}_${new Date().toISOString().split('T')[0]}.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        // 2. Создаём ZIP архив с фото
+        const zip = new JSZip();
+        const photoFolder = zip.folder('Фото');
         
-        // Формируем текст для отправки
+        Object.entries(inspectionState.answers).forEach(([itemId, answer]) => {
+            if (answer.photo) {
+                const base64Data = answer.photo.split(',')[1];
+                photoFolder.file(answer.photoName, base64Data, {base64: true});
+            }
+        });
+        
+        const zipBuffer = await zip.generateAsync({type: 'blob'});
+        
+        // 3. Скачиваем Excel
+        const excelBlob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const excelUrl = URL.createObjectURL(excelBlob);
+        const excelLink = document.createElement('a');
+        excelLink.href = excelUrl;
+        excelLink.download = `Проверка_${storeNumber}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(excelLink);
+        excelLink.click();
+        document.body.removeChild(excelLink);
+        URL.revokeObjectURL(excelUrl);
+        
+        // 4. Скачиваем ZIP с фото
+        const zipUrl = URL.createObjectURL(zipBuffer);
+        const zipLink = document.createElement('a');
+        zipLink.href = zipUrl;
+        zipLink.download = `Фото_${storeNumber}_${new Date().toISOString().split('T')[0]}.zip`;
+        document.body.appendChild(zipLink);
+        zipLink.click();
+        document.body.removeChild(zipLink);
+        URL.revokeObjectURL(zipUrl);
+        
+        // 5. Копируем текст отчёта
         const reportText = `📋 ПРОВЕРКА МАГАЗИНА
 
 🏪 Магазин: ${storeNumber}
+📍 Адрес: ${inspectionState.storeAddress || 'не указан'}
 👤 Ревизор: ${inspectionState.inspectorName || 'не указан'}
 📊 Нарушений: ${violations} из ${totalItems}
-📎 Excel-файл скачан
+📸 Фото: ${photoCount} шт.
 
 ${violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ'}
 
-Отправьте файл нужному получателю в Telegram.`;
+📎 Файлы скачаны:
+• Отчёт.xlsx
+• Фото.zip
+
+Отправьте файлы получателю в Telegram.`;
         
-        // Копируем текст в буфер
         await navigator.clipboard.writeText(reportText);
         
-        showToast('✅ Excel скачан! Выберите получателя в Telegram');
+        showToast('✅ Файлы скачаны! Выберите получателя');
         
-        // Предлагаем открыть Telegram для выбора получателя
+        // 6. Предлагаем открыть Telegram
         setTimeout(() => {
-            tg.showConfirm('Excel-файл скачан и текст скопирован.\n\nОткрыть Telegram для выбора получателя?', (confirmed) => {
+            tg.showConfirm('Файлы скачаны и текст скопирован.\n\nОткрыть Telegram для выбора получателя?', (confirmed) => {
                 if (confirmed) {
                     window.open('https://t.me', '_blank');
                 }
