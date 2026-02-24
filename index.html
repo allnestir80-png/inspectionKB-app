@@ -6,31 +6,57 @@
     <title>Чек-лист проверки магазина</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563eb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Инспекция">
+    
+    <!-- Telegram Web App SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- ExcelJS для генерации отчётов -->
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.0/dist/jszip.min.js"></script>
+    
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        /* === БАЗОВЫЕ СТИЛИ === */
+        * { 
+            box-sizing: border-box; 
+            margin: 0; 
+            padding: 0; 
+            -webkit-tap-highlight-color: transparent; 
+        }
+        
         body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
             background: var(--tg-theme-bg-color, #f5f5f5); 
             color: var(--tg-theme-text-color, #1f2937);
             padding-bottom: 90px; 
-            line-height: 1.5; 
+            line-height: 1.5;
+            min-height: 100vh;
         }
         
+        /* === HEADER === */
         .header { 
             background: var(--tg-theme-button-color, #2563eb); 
-            color: var(--tg-theme-button-text-color, white); 
+            color: var(--tg-theme-button-text-color, #ffffff); 
             padding: 16px; 
             position: sticky; 
             top: 0; 
             z-index: 100; 
             box-shadow: 0 2px 8px rgba(0,0,0,0.15); 
         }
-        .header h1 { font-size: 18px; font-weight: 600; }
-        .header-info { font-size: 12px; opacity: 0.95; margin-top: 6px; }
         
+        .header h1 { 
+            font-size: 18px; 
+            font-weight: 600; 
+        }
+        
+        .header-info { 
+            font-size: 12px; 
+            opacity: 0.95; 
+            margin-top: 6px; 
+        }
+        
+        /* === SYNC STATUS === */
         .sync-status { 
             position: fixed; 
             top: 70px; 
@@ -46,9 +72,18 @@
             align-items: center; 
             gap: 6px; 
         }
-        .sync-status.online { background: #d1fae5; color: #065f46; }
-        .sync-status.offline { background: #fee2e2; color: #991b1b; }
         
+        .sync-status.online { 
+            background: #d1fae5; 
+            color: #065f46; 
+        }
+        
+        .sync-status.offline { 
+            background: #fee2e2; 
+            color: #991b1b; 
+        }
+        
+        /* === PROGRESS BAR === */
         .progress-container { 
             position: fixed; 
             top: 0; 
@@ -58,22 +93,41 @@
             background: #e5e7eb; 
             z-index: 101; 
         }
+        
         .progress-fill { 
             height: 100%; 
             background: linear-gradient(90deg, #10b981, #34d399); 
             transition: width 0.4s ease; 
         }
         
+        /* === STORE INFO === */
         .store-info { 
-            background: var(--tg-theme-secondary-bg-color, white); 
+            background: var(--tg-theme-secondary-bg-color, #ffffff); 
             padding: 16px; 
             margin: 12px; 
             border-radius: 12px; 
             box-shadow: 0 1px 4px rgba(0,0,0,0.08); 
         }
-        .store-info h2 { font-size: 15px; color: var(--tg-theme-text-color, #1f2937); margin-bottom: 14px; font-weight: 600; }
-        .form-group { margin-bottom: 14px; }
-        .form-group label { display: block; font-size: 13px; color: var(--tg-theme-hint-color, #6b7280); margin-bottom: 6px; font-weight: 500; }
+        
+        .store-info h2 { 
+            font-size: 15px; 
+            color: var(--tg-theme-text-color, #1f2937); 
+            margin-bottom: 14px; 
+            font-weight: 600; 
+        }
+        
+        .form-group { 
+            margin-bottom: 14px; 
+        }
+        
+        .form-group label { 
+            display: block; 
+            font-size: 13px; 
+            color: var(--tg-theme-hint-color, #6b7280); 
+            margin-bottom: 6px; 
+            font-weight: 500; 
+        }
+        
         .form-group input { 
             width: 100%; 
             padding: 12px; 
@@ -84,46 +138,120 @@
             color: var(--tg-theme-text-color, #1f2937);
             transition: border-color 0.2s; 
         }
-        .form-group input:focus { outline: none; border-color: var(--tg-theme-button-color, #2563eb); }
         
+        .form-group input:focus { 
+            outline: none; 
+            border-color: var(--tg-theme-button-color, #2563eb); 
+        }
+        
+        .form-group input:read-only {
+            background: var(--tg-theme-secondary-bg-color, #f3f4f6);
+            color: var(--tg-theme-hint-color, #9ca3af);
+        }
+        
+        /* === CHECKLIST SECTION === */
         .section { 
-            background: var(--tg-theme-secondary-bg-color, white); 
+            background: var(--tg-theme-secondary-bg-color, #ffffff); 
             margin: 12px; 
             border-radius: 12px; 
             box-shadow: 0 1px 4px rgba(0,0,0,0.08); 
             overflow: hidden; 
         }
+        
         .section-header { 
             background: var(--tg-theme-bg-color, #f8fafc); 
             padding: 14px 16px; 
             border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #e5e7eb); 
         }
-        .section-header h3 { font-size: 14px; color: var(--tg-theme-text-color, #1f2937); font-weight: 600; }
-        .section-header p { font-size: 12px; color: var(--tg-theme-hint-color, #6b7280); margin-top: 4px; }
         
-        .item { padding: 16px; border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f3f4f6); }
-        .item:last-child { border-bottom: none; }
-        .item-id { font-size: 11px; color: var(--tg-theme-hint-color, #9ca3af); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
-        .item-text { font-size: 14px; color: var(--tg-theme-text-color, #1f2937); margin: 8px 0; line-height: 1.5; }
+        .section-header h3 { 
+            font-size: 14px; 
+            color: var(--tg-theme-text-color, #1f2937); 
+            font-weight: 600; 
+        }
         
-        .status-toggle { display: flex; gap: 10px; margin: 12px 0; }
+        .section-header p { 
+            font-size: 12px; 
+            color: var(--tg-theme-hint-color, #6b7280); 
+            margin-top: 4px; 
+        }
+        
+        .section-counter { 
+            float: right; 
+            background: var(--tg-theme-button-color, #2563eb); 
+            color: var(--tg-theme-button-text-color, #ffffff); 
+            padding: 3px 10px; 
+            border-radius: 12px; 
+            font-size: 11px; 
+            font-weight: 600; 
+        }
+        
+        /* === CHECKLIST ITEM === */
+        .item { 
+            padding: 16px; 
+            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f3f4f6); 
+        }
+        
+        .item:last-child { 
+            border-bottom: none; 
+        }
+        
+        .item-id { 
+            font-size: 11px; 
+            color: var(--tg-theme-hint-color, #9ca3af); 
+            font-weight: 700; 
+            letter-spacing: 0.5px; 
+            text-transform: uppercase; 
+        }
+        
+        .item-text { 
+            font-size: 14px; 
+            color: var(--tg-theme-text-color, #1f2937); 
+            margin: 8px 0; 
+            line-height: 1.5; 
+        }
+        
+        /* === STATUS TOGGLE === */
+        .status-toggle { 
+            display: flex; 
+            gap: 10px; 
+            margin: 12px 0; 
+        }
+        
         .status-btn { 
             flex: 1; 
             padding: 11px; 
             border: 2px solid var(--tg-theme-secondary-bg-color, #e5e7eb); 
             border-radius: 8px; 
-            background: var(--tg-theme-bg-color, white); 
+            background: var(--tg-theme-bg-color, #ffffff); 
             font-size: 13px; 
             font-weight: 600; 
             cursor: pointer; 
             transition: all 0.2s; 
             color: var(--tg-theme-text-color, #6b7280); 
         }
-        .status-btn.ok { border-color: #10b981; color: #065f46; }
-        .status-btn.ok.active { background: #d1fae5; border-color: #10b981; }
-        .status-btn.fail { border-color: #ef4444; color: #991b1b; }
-        .status-btn.fail.active { background: #fee2e2; border-color: #ef4444; }
         
+        .status-btn.ok { 
+            border-color: #10b981; 
+            color: #065f46; 
+        }
+        
+        .status-btn.ok.active { 
+            background: #d1fae5; 
+            border-color: #10b981; 
+        }
+        
+        .status-btn.fail { 
+            border-color: #ef4444; 
+            color: #991b1b; 
+        }
+        
+        .status-btn.fail.active { 
+            background: #fee2e2; 
+            border-color: #ef4444; 
+        }
+        
+        /* === COMMENT FIELD === */
         .comment-field { 
             width: 100%; 
             padding: 11px; 
@@ -138,10 +266,21 @@
             min-height: 70px; 
             font-family: inherit; 
         }
-        .comment-field.visible { display: block; }
-        .comment-field:focus { outline: none; border-color: var(--tg-theme-button-color, #2563eb); }
         
-        .photo-upload { margin-top: 12px; }
+        .comment-field.visible { 
+            display: block; 
+        }
+        
+        .comment-field:focus { 
+            outline: none; 
+            border-color: var(--tg-theme-button-color, #2563eb); 
+        }
+        
+        /* === PHOTO UPLOAD === */
+        .photo-upload { 
+            margin-top: 12px; 
+        }
+        
         .photo-btn { 
             display: inline-flex; 
             align-items: center; 
@@ -156,18 +295,41 @@
             font-weight: 500; 
             transition: background 0.2s; 
         }
-        .photo-btn:hover { background: var(--tg-theme-secondary-bg-color, #e5e7eb); }
-        .photo-btn input { display: none; }
-        .photo-preview { margin-top: 10px; max-width: 120px; border-radius: 8px; display: none; border: 2px solid var(--tg-theme-secondary-bg-color, #e5e7eb); }
-        .photo-preview.visible { display: block; }
-        .photo-count { font-size: 12px; color: #10b981; margin-left: 10px; font-weight: 500; }
         
+        .photo-btn:hover { 
+            background: var(--tg-theme-secondary-bg-color, #e5e7eb); 
+        }
+        
+        .photo-btn:active {
+            transform: scale(0.98);
+        }
+        
+        .photo-preview { 
+            margin-top: 10px; 
+            max-width: 120px; 
+            border-radius: 8px; 
+            display: none; 
+            border: 2px solid var(--tg-theme-secondary-bg-color, #e5e7eb); 
+        }
+        
+        .photo-preview.visible { 
+            display: block; 
+        }
+        
+        .photo-count { 
+            font-size: 12px; 
+            color: #10b981; 
+            margin-left: 10px; 
+            font-weight: 500; 
+        }
+        
+        /* === ACTION BAR === */
         .action-bar { 
             position: fixed; 
             bottom: 0; 
             left: 0; 
             right: 0; 
-            background: var(--tg-theme-secondary-bg-color, white); 
+            background: var(--tg-theme-secondary-bg-color, #ffffff); 
             padding: 14px 16px; 
             box-shadow: 0 -3px 12px rgba(0,0,0,0.1); 
             display: flex; 
@@ -175,6 +337,7 @@
             z-index: 100; 
             padding-bottom: max(14px, env(safe-area-inset-bottom)); 
         }
+        
         .action-btn { 
             flex: 1; 
             padding: 15px; 
@@ -185,12 +348,30 @@
             cursor: pointer; 
             transition: all 0.2s; 
         }
-        .btn-save { background: var(--tg-theme-bg-color, #f3f4f6); color: var(--tg-theme-text-color, #1f2937); }
-        .btn-save:active { background: var(--tg-theme-secondary-bg-color, #e5e7eb); }
-        .btn-send { background: var(--tg-theme-button-color, #2563eb); color: var(--tg-theme-button-text-color, white); }
-        .btn-send:active { transform: scale(0.98); }
-        .btn-send:disabled { background: #9ca3af; }
         
+        .btn-save { 
+            background: var(--tg-theme-bg-color, #f3f4f6); 
+            color: var(--tg-theme-text-color, #1f2937); 
+        }
+        
+        .btn-save:active { 
+            background: var(--tg-theme-secondary-bg-color, #e5e7eb); 
+        }
+        
+        .btn-send { 
+            background: var(--tg-theme-button-color, #2563eb); 
+            color: var(--tg-theme-button-text-color, #ffffff); 
+        }
+        
+        .btn-send:active { 
+            transform: scale(0.98); 
+        }
+        
+        .btn-send:disabled { 
+            background: #9ca3af; 
+        }
+        
+        /* === TOAST NOTIFICATION === */
         .toast { 
             position: fixed; 
             top: 50%; 
@@ -208,39 +389,61 @@
             text-align: center; 
             max-width: 85%; 
         }
-        .toast.visible { display: block; opacity: 1; transform: translate(-50%, -50%) scale(1); }
         
-        .section-counter { 
-            float: right; 
-            background: var(--tg-theme-button-color, #2563eb); 
-            color: var(--tg-theme-button-text-color, white); 
-            padding: 3px 10px; 
-            border-radius: 12px; 
-            font-size: 11px; 
-            font-weight: 600; 
+        .toast.visible { 
+            display: block; 
+            opacity: 1; 
+            transform: translate(-50%, -50%) scale(1); 
         }
         
+        /* === RESPONSIVE === */
         @media (min-width: 768px) {
-            body { max-width: 640px; margin: 0 auto; }
-            .action-bar { max-width: 640px; left: 50%; transform: translateX(-50%); border-radius: 12px 12px 0 0; }
+            body { 
+                max-width: 640px; 
+                margin: 0 auto; 
+            }
+            
+            .action-bar { 
+                max-width: 640px; 
+                left: 50%; 
+                transform: translateX(-50%); 
+                border-radius: 12px 12px 0 0; 
+            }
+            
+            .header, .store-info, .section {
+                max-width: 640px;
+                margin-left: auto;
+                margin-right: auto;
+            }
+        }
+        
+        /* === PRINT STYLES === */
+        @media print {
+            .action-bar, .sync-status, .progress-container { 
+                display: none; 
+            }
         }
     </style>
 </head>
 <body>
+    <!-- Header -->
     <div class="header">
         <h1>📋 Чек-лист проверки магазина</h1>
         <div class="header-info" id="headerInfo">Ревизор: загрузка...</div>
     </div>
     
+    <!-- Sync Status Indicator -->
     <div class="sync-status offline" id="syncStatus">
         <span id="syncIcon">📴</span>
         <span id="syncText">Офлайн</span>
     </div>
     
+    <!-- Progress Bar -->
     <div class="progress-container">
         <div class="progress-fill" id="progressBar"></div>
     </div>
     
+    <!-- Store Information Form -->
     <div class="store-info">
         <h2>🏪 Информация о магазине</h2>
         <div class="form-group">
@@ -261,16 +464,22 @@
         </div>
     </div>
     
+    <!-- Checklist Container -->
     <div id="checklistContainer"></div>
     
+    <!-- Action Bar -->
     <div class="action-bar">
         <button class="action-btn btn-save" onclick="saveProgress()">💾 Сохранить</button>
-        <button class="action-btn btn-send" id="sendBtn" onclick="sendReport()">📤 Отправить в Telegram</button>
+        <button class="action-btn btn-send" id="sendBtn" onclick="sendReport()">📤 Отправить отчёт</button>
     </div>
     
+    <!-- Toast Notification -->
     <div class="toast" id="toast"></div>
     
+    <!-- Main Scripts -->
     <script src="app.js"></script>
+    
+    <!-- Service Worker Registration -->
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js?v=2.0')
@@ -278,6 +487,7 @@
                 .catch(err => console.error('❌ Ошибка SW:', err));
         }
         
+        // Online/Offline Status
         function updateSyncStatus() {
             const status = document.getElementById('syncStatus');
             const icon = document.getElementById('syncIcon');
@@ -292,6 +502,7 @@
                 text.textContent = 'Офлайн';
             }
         }
+        
         window.addEventListener('online', updateSyncStatus);
         window.addEventListener('offline', updateSyncStatus);
         updateSyncStatus();
