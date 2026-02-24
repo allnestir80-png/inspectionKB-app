@@ -1,19 +1,29 @@
 // ============================================================================
 // ЧЕК-ЛИСТ ПРОВЕРКИ ПОМЕЩЕНИЙ МАГАЗИНА
-// Версия: 2.0
-// Согласно Техническому Заданию
+// Версия: 2.1 (с исправлениями отладки)
 // ============================================================================
 
-// === ТЕЛЕГРАМ WEB APP ===
+console.log('🚀 App.js загружен');
+
+// === TELEGRAM WEB APP ===
 const tg = window.Telegram.WebApp;
-tg.expand();
+console.log('Telegram WebApp:', tg);
+
+// Инициализация
 tg.ready();
+tg.expand();
+console.log('Telegram WebApp готов');
 
 // Запрашиваем разрешения
-tg.requestCameraAccess();
-tg.requestWriteAccess();
+try {
+    tg.requestCameraAccess();
+    tg.requestWriteAccess();
+    console.log('Разрешения запрошены');
+} catch (e) {
+    console.warn('Не удалось запросить разрешения:', e);
+}
 
-// === ЧЕК-ЛИСТ ИЗ ДОКУМЕНТОВ (36 пунктов) ===
+// === CHECKLIST DATA (36 пунктов) ===
 const CHECKLIST_DATA = [
     {
         section: "1. ОБЩИЕ ТРЕБОВАНИЯ",
@@ -83,34 +93,7 @@ const CHECKLIST_DATA = [
     }
 ];
 
-// === INDEXEDDB CONFIGURATION ===
-let db;
-const DB_NAME = 'InspectionDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'inspections';
-
-function initDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        
-        request.onupgradeneeded = (e) => {
-            db = e.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                const store = db.createObjectStore(STORE_NAME, { keyPath: 'inspectionId' });
-                store.createIndex('storeNumber', 'storeNumber', { unique: false });
-                store.createIndex('timestamp', 'timestamp', { unique: false });
-                store.createIndex('inspectorId', 'inspectorId', { unique: false });
-            }
-        };
-        
-        request.onsuccess = (e) => {
-            db = e.target.result;
-            resolve(db);
-        };
-        
-        request.onerror = (e) => reject(e);
-    });
-}
+console.log('Чек-лист загружен:', CHECKLIST_DATA.length, 'разделов');
 
 // === STATE MANAGEMENT ===
 const inspectionState = {
@@ -123,13 +106,50 @@ const inspectionState = {
     answers: {}
 };
 
-function generateId() {
-    return 'INS_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9).toUpperCase();
+// === INDEXEDDB ===
+let db;
+const DB_NAME = 'InspectionDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'inspections';
+
+function initDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        
+        request.onupgradeneeded = (e) => {
+            console.log('Создание базы данных');
+            db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                const store = db.createObjectStore(STORE_NAME, { keyPath: 'inspectionId' });
+                store.createIndex('storeNumber', 'storeNumber', { unique: false });
+                store.createIndex('timestamp', 'timestamp', { unique: false });
+                store.createIndex('inspectorId', 'inspectorId', { unique: false });
+            }
+        };
+        
+        request.onsuccess = (e) => {
+            db = e.target.result;
+            console.log('База данных инициализирована');
+            resolve(db);
+        };
+        
+        request.onerror = (e) => {
+            console.error('Ошибка базы данных:', e);
+            reject(e);
+        };
+    });
 }
 
 // === UI RENDER ===
 function renderChecklist() {
+    console.log('Рендеринг чек-листа...');
     const container = document.getElementById('checklistContainer');
+    
+    if (!container) {
+        console.error('Контейнер checklistContainer не найден!');
+        return;
+    }
+    
     container.innerHTML = '';
     
     CHECKLIST_DATA.forEach((section, sectionIndex) => {
@@ -172,6 +192,7 @@ function renderChecklist() {
         });
     });
     
+    console.log('Чек-лист отрисован');
     updateProgress();
 }
 
@@ -225,43 +246,46 @@ function updateSectionCounters() {
     });
 }
 
-// === PHOTO HANDLING (TELEGRAM MEDIA PICKER) ===
+// === PHOTO HANDLING ===
 let currentPhotoItemId = null;
 
 function selectPhoto(itemId) {
     currentPhotoItemId = itemId;
+    console.log('Выбор фото для пункта:', itemId);
     
-    // Проверяем поддержку Telegram MediaPicker
-    if (tg.MediaPicker && tg.MediaPicker.pickMedia) {
-        tg.MediaPicker.pickMedia({
-            mediaType: 'photo',
-            maxCount: 1
-        })
-        .then((media) => {
-            if (media && media.length > 0) {
-                handleTelegramMedia(itemId, media[0]);
+    // Показываем выбор через Telegram или стандартный input
+    tg.showPopup({
+        title: '📷 Добавить фото',
+        message: 'Выберите способ добавления фото',
+        buttons: [
+            {
+                type: 'button',
+                text: '📷 Камера',
+                callback: () => openFileInput(itemId, 'camera')
+            },
+            {
+                type: 'button',
+                text: '🖼️ Галерея',
+                callback: () => openFileInput(itemId, 'gallery')
+            },
+            {
+                type: 'cancel',
+                text: 'Отмена'
             }
-        })
-        .catch((err) => {
-            console.error('Telegram MediaPicker error:', err);
-            fallbackToFileInput(itemId);
-        });
-    } else {
-        fallbackToFileInput(itemId);
-    }
+        ]
+    });
 }
 
-function fallbackToFileInput(itemId) {
-    currentPhotoItemId = itemId;
-    
+function openFileInput(itemId, type) {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
+    
+    if (type === 'camera') {
+        input.capture = 'environment';
+    }
+    
     input.style.display = 'none';
-    input.style.position = 'fixed';
-    input.style.top = '0';
-    input.style.left = '0';
-    input.style.opacity = '0';
     document.body.appendChild(input);
     
     input.onchange = (e) => {
@@ -276,43 +300,7 @@ function fallbackToFileInput(itemId) {
         }, 1000);
     };
     
-    input.onerror = () => {
-        showToast('⚠️ Ошибка выбора фото');
-        if (document.body.contains(input)) {
-            document.body.removeChild(input);
-        }
-    };
-    
-    setTimeout(() => input.click(), 100);
-}
-
-function handleTelegramMedia(itemId, media) {
-    showToast('🔄 Загрузка фото...');
-    
-    if (media.file_id) {
-        tg.getFile(media.file_id)
-            .then((file) => {
-                const reader = new FileReader();
-                reader.onload = (e) => savePhoto(itemId, e.target.result);
-                reader.readAsDataURL(file.blob);
-            })
-            .catch((err) => {
-                console.error('GetFile error:', err);
-                fallbackToFileInput(itemId);
-            });
-    } else if (media.url) {
-        fetch(media.url)
-            .then(res => res.blob())
-            .then(blob => {
-                const reader = new FileReader();
-                reader.onload = (e) => savePhoto(itemId, e.target.result);
-                reader.readAsDataURL(blob);
-            })
-            .catch((err) => {
-                console.error('Fetch error:', err);
-                fallbackToFileInput(itemId);
-            });
-    }
+    input.click();
 }
 
 function handlePhotoFile(itemId, file) {
@@ -351,34 +339,7 @@ function savePhoto(itemId, base64Data) {
     autoSave();
 }
 
-function compressImage(file, maxWidth = 1024, quality = 0.75) {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let width = img.width;
-                let height = img.height;
-                
-                if (width > maxWidth) {
-                    height = Math.round((maxWidth / width) * height);
-                    width = maxWidth;
-                }
-                
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-                canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
-            };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-    });
-}
-
-// === AUTO-SAVE (каждые 1.5 секунды) ===
+// === AUTO-SAVE ===
 let autoSaveTimeout;
 
 function autoSave() {
@@ -416,13 +377,21 @@ async function saveProgress() {
         const completedItems = Object.keys(inspectionState.answers).length;
         showToast(`💾 Сохранено (${completedItems}/${totalItems})`);
     } catch (err) {
+        console.error('Ошибка сохранения:', err);
         showToast('⚠️ Ошибка сохранения');
-        console.error(err);
     }
 }
 
-// === GENERATE EXCEL REPORT ===
+function generateId() {
+    return 'INS_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9).toUpperCase();
+}
+
+// === GENERATE EXCEL ===
 async function generateExcelReport() {
+    if (typeof ExcelJS === 'undefined') {
+        throw new Error('Библиотека ExcelJS не загружена');
+    }
+    
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Проверка');
     
@@ -435,19 +404,19 @@ async function generateExcelReport() {
         { header: 'Фото файл', key: 'photo', width: 20 }
     ];
     
-    // Header info
     worksheet.addRow(['Магазин:', inspectionState.storeNumber]).font = { bold: true };
     worksheet.addRow(['Адрес:', inspectionState.storeAddress || 'не указан']);
     worksheet.addRow(['Ревизор:', inspectionState.inspectorName || 'не указан']);
     worksheet.addRow(['Дата:', new Date(inspectionState.timestamp).toLocaleString('ru-RU')]);
-    worksheet.addRow(['Всего пунктов:', CHECKLIST_DATA.reduce((sum, s) => sum + s.items.length, 0)]);
     
     const violations = Object.values(inspectionState.answers).filter(a => a.status === 'fail').length;
+    const totalItems = CHECKLIST_DATA.reduce((sum, s) => sum + s.items.length, 0);
+    
+    worksheet.addRow(['Всего пунктов:', totalItems]);
     worksheet.addRow(['Нарушений:', violations]);
     worksheet.addRow(['Статус:', violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ']);
     worksheet.addRow([]);
     
-    // Checklist data
     CHECKLIST_DATA.forEach(section => {
         section.items.forEach(item => {
             const answer = inspectionState.answers[item.id] || {};
@@ -486,13 +455,11 @@ async function sendReport() {
     showToast('🔄 Генерация отчёта...');
     
     try {
-        // Generate Excel
         const excelBuffer = await generateExcelReport();
         const excelBlob = new Blob([excelBuffer], { 
             type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
         });
         
-        // Download Excel
         const excelUrl = URL.createObjectURL(excelBlob);
         const excelLink = document.createElement('a');
         excelLink.href = excelUrl;
@@ -504,7 +471,6 @@ async function sendReport() {
         
         showToast('✅ Excel скачан!');
         
-        // Copy report text to clipboard
         const reportText = `📋 ПРОВЕРКА МАГАЗИНА
 
 🏪 Магазин: ${storeNumber}
@@ -524,7 +490,6 @@ ID: ${inspectionState.inspectionId}`;
             console.error('Clipboard error:', err);
         }
         
-        // Show final instruction
         setTimeout(() => {
             tg.showAlert(
                 '✅ ОТЧЁТ ГОТОВ!\n\n' +
@@ -549,7 +514,7 @@ ID: ${inspectionState.inspectionId}`;
     }
 }
 
-// === PROGRESS BAR ===
+// === PROGRESS ===
 function updateProgress() {
     const totalItems = CHECKLIST_DATA.reduce((sum, s) => sum + s.items.length, 0);
     const completedItems = Object.keys(inspectionState.answers).length;
@@ -557,7 +522,6 @@ function updateProgress() {
     
     document.getElementById('progressBar').style.width = `${progress}%`;
     
-    // Show Telegram MainButton at 100%
     if (progress === 100) {
         tg.MainButton.setText('📤 ОТПРАВИТЬ ОТЧЁТ');
         tg.MainButton.onClick(sendReport);
@@ -567,12 +531,16 @@ function updateProgress() {
     }
 }
 
-// === TOAST NOTIFICATION ===
+// === TOAST ===
 function showToast(message) {
     const toast = document.getElementById('toast');
-    toast.textContent = message;
-    toast.classList.add('visible');
-    setTimeout(() => toast.classList.remove('visible'), 2500);
+    if (toast) {
+        toast.textContent = message;
+        toast.classList.add('visible');
+        setTimeout(() => toast.classList.remove('visible'), 2500);
+    } else {
+        console.log('Toast:', message);
+    }
 }
 
 // === LOAD SAVED DATA ===
@@ -599,7 +567,6 @@ async function loadSavedInspection() {
                 document.getElementById('inspectorName').value = last.inspectorName || '';
                 document.getElementById('inspectorId').value = last.inspectorId || '';
                 
-                // Restore answers
                 Object.entries(last.answers || {}).forEach(([itemId, answer]) => {
                     const btns = document.querySelectorAll(`button[onclick*="'${itemId}'"]`);
                     
@@ -639,39 +606,54 @@ async function loadSavedInspection() {
 
 // === INITIALIZATION ===
 document.addEventListener('DOMContentLoaded', () => {
-    renderChecklist();
-    loadSavedInspection();
+    console.log('DOM загружен');
     
-    // Get user data from Telegram
-    const user = tg.initDataUnsafe.user;
-    if (user) {
-        const inspectorName = `${user.first_name} ${user.last_name || ''}`.trim();
-        const userId = user.id.toString();
+    // Проверяем Telegram WebApp
+    if (!tg) {
+        console.error('Telegram WebApp не доступен!');
+        showToast('⚠️ Ошибка: Telegram WebApp не загружен');
+    } else {
+        console.log('Telegram WebApp доступен');
         
-        if (inspectorName) {
-            document.getElementById('inspectorName').value = inspectorName;
-            document.getElementById('headerInfo').textContent = `Ревизор: ${inspectorName}`;
-        }
+        // Получаем данные пользователя
+        const user = tg.initDataUnsafe.user;
+        console.log('User data:', user);
         
-        if (userId) {
-            document.getElementById('inspectorId').value = userId;
+        if (user) {
+            const inspectorName = `${user.first_name} ${user.last_name || ''}`.trim();
+            const userId = user.id.toString();
+            
+            if (inspectorName) {
+                document.getElementById('inspectorName').value = inspectorName;
+                document.getElementById('headerInfo').textContent = `Ревизор: ${inspectorName}`;
+                inspectionState.inspectorName = inspectorName;
+            }
+            
+            if (userId) {
+                document.getElementById('inspectorId').value = userId;
+                inspectionState.inspectorId = userId;
+            }
+        } else {
+            console.warn('Данные пользователя не получены');
+            document.getElementById('headerInfo').textContent = 'Ревизор: не авторизован';
         }
     }
     
-    // Apply Telegram theme colors
-    document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#f5f5f5');
-    document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#1f2937');
-    document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#2563eb');
-    document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
-    document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#ffffff');
-    document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#9ca3af');
+    // Применяем тему Telegram
+    if (tg.themeParams) {
+        document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#f5f5f5');
+        document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#1f2937');
+        document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#2563eb');
+        document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
+        document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#ffffff');
+        document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#9ca3af');
+    }
     
-    // Haptic feedback
-    document.querySelectorAll('.status-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            if (tg.HapticFeedback) {
-                tg.HapticFeedback.impactOccurred('light');
-            }
-        });
-    });
+    // Рендерим чек-лист
+    renderChecklist();
+    
+    // Загружаем сохранённые данные
+    loadSavedInspection();
+    
+    console.log('Инициализация завершена');
 });
