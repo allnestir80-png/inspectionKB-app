@@ -127,10 +127,9 @@ function renderChecklist() {
                 </div>
                 <textarea class="comment-field" id="comment-${item.id}" placeholder="Опишите нарушение подробно..." rows="2"></textarea>
                 <div class="photo-upload">
-                    <label class="photo-btn">
-                        📷 Фото
-                        <input type="file" accept="image/*" capture="environment" onchange="handlePhoto('${item.id}', this)">
-                    </label>
+                    <button class="photo-btn" onclick="openCamera('${item.id}')">
+                        📷 Добавить фото
+                    </button>
                     <img class="photo-preview" id="photo-${item.id}">
                     <span class="photo-count" id="photo-count-${item.id}"></span>
                 </div>
@@ -197,6 +196,43 @@ function updateSectionCounters() {
     });
 }
 
+// === CAMERA HANDLING ===
+function openCamera(itemId) {
+    tg.showPopup({
+        title: '📷 Добавить фото',
+        message: 'Выберите способ добавления фото для пункта ' + itemId,
+        buttons: [
+            {
+                type: 'button',
+                text: '📷 Сделать фото',
+                callback: () => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.capture = 'environment';
+                    input.onchange = (e) => handlePhoto(itemId, e.target);
+                    input.click();
+                }
+            },
+            {
+                type: 'button',
+                text: '🖼️ Из галереи',
+                callback: () => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = (e) => handlePhoto(itemId, e.target);
+                    input.click();
+                }
+            },
+            {
+                type: 'cancel',
+                text: 'Отмена'
+            }
+        ]
+    });
+}
+
 // === PHOTO HANDLING ===
 async function handlePhoto(itemId, input) {
     const file = input.files[0];
@@ -228,7 +264,6 @@ async function handlePhoto(itemId, input) {
             if (!inspectionState.answers[itemId]) {
                 inspectionState.answers[itemId] = { status: 'ok', comment: '' };
             }
-            // Сохраняем фото с именем пункта
             inspectionState.answers[itemId].photo = e.target.result;
             inspectionState.answers[itemId].photoName = `punkt_${itemId.replace(/\./g, '_')}.jpg`;
             
@@ -386,9 +421,11 @@ async function sendReport() {
         
         const zipBuffer = await zip.generateAsync({type: 'blob'});
         
-        // 3. Скачиваем Excel
+        // 3. Скачиваем Excel файл
         const excelBlob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const excelUrl = URL.createObjectURL(excelBlob);
+        
+        // Создаём ссылку для скачивания
         const excelLink = document.createElement('a');
         excelLink.href = excelUrl;
         excelLink.download = `Проверка_${storeNumber}_${new Date().toISOString().split('T')[0]}.xlsx`;
@@ -397,17 +434,23 @@ async function sendReport() {
         document.body.removeChild(excelLink);
         URL.revokeObjectURL(excelUrl);
         
-        // 4. Скачиваем ZIP с фото
-        const zipUrl = URL.createObjectURL(zipBuffer);
-        const zipLink = document.createElement('a');
-        zipLink.href = zipUrl;
-        zipLink.download = `Фото_${storeNumber}_${new Date().toISOString().split('T')[0]}.zip`;
-        document.body.appendChild(zipLink);
-        zipLink.click();
-        document.body.removeChild(zipLink);
-        URL.revokeObjectURL(zipUrl);
+        showToast('✅ Excel скачан!');
         
-        // 5. Копируем текст отчёта
+        // 4. Скачиваем ZIP с фото (если есть фото)
+        if (photoCount > 0) {
+            const zipUrl = URL.createObjectURL(zipBuffer);
+            const zipLink = document.createElement('a');
+            zipLink.href = zipUrl;
+            zipLink.download = `Фото_${storeNumber}_${new Date().toISOString().split('T')[0]}.zip`;
+            document.body.appendChild(zipLink);
+            zipLink.click();
+            document.body.removeChild(zipLink);
+            URL.revokeObjectURL(zipUrl);
+            
+            showToast('✅ ZIP с фото скачан!');
+        }
+        
+        // 5. Копируем текст отчёта в буфер
         const reportText = `📋 ПРОВЕРКА МАГАЗИНА
 
 🏪 Магазин: ${storeNumber}
@@ -419,28 +462,44 @@ async function sendReport() {
 ${violations === 0 ? '✅ БЕЗ НАРУШЕНИЙ' : '⚠️ ЕСТЬ НАРУШЕНИЯ'}
 
 📎 Файлы скачаны:
-• Отчёт.xlsx
-• Фото.zip
+• Проверка_${storeNumber}.xlsx
+• Фото_${storeNumber}.zip
 
 Отправьте файлы получателю в Telegram.`;
         
-        await navigator.clipboard.writeText(reportText);
+        // Пробуем скопировать в буфер
+        try {
+            await navigator.clipboard.writeText(reportText);
+            showToast('✅ Текст скопирован!');
+        } catch (err) {
+            console.error('Clipboard error:', err);
+            showToast('⚠️ Скопируйте текст вручную');
+        }
         
-        showToast('✅ Файлы скачаны! Выберите получателя');
-        
-        // 6. Предлагаем открыть Telegram
+        // 6. Показываем итоговое сообщение
         setTimeout(() => {
-            tg.showConfirm('Файлы скачаны и текст скопирован.\n\nОткрыть Telegram для выбора получателя?', (confirmed) => {
-                if (confirmed) {
-                    window.open('https://t.me', '_blank');
+            tg.showAlert(
+                '✅ ОТЧЁТ ГОТОВ!\n\n' +
+                '📥 Скачано файлов:\n' +
+                '• Проверка_' + storeNumber + '.xlsx\n' +
+                (photoCount > 0 ? '• Фото_' + storeNumber + '.zip\n\n' : '\n') +
+                '📋 Текст отчёта скопирован\n\n' +
+                '📲 Дальнейшие действия:\n' +
+                '1. Откройте Telegram\n' +
+                '2. Найдите получателя\n' +
+                '3. Вставьте текст (долгий тап)\n' +
+                '4. Прикрепите файлы из загрузок\n' +
+                '5. Отправьте сообщение',
+                () => {
+                    tg.close();
                 }
-                tg.close();
-            });
-        }, 1500);
+            );
+        }, 1000);
         
     } catch (error) {
-        showToast('⚠️ Ошибка: ' + error.message);
         console.error('Error:', error);
+        showToast('⚠️ Ошибка: ' + error.message);
+        tg.showAlert('Ошибка генерации отчёта:\n' + error.message);
     }
 }
 
